@@ -1,6 +1,6 @@
 # macOS Uninstall Cleanup
 
-A Codex skill for auditing macOS app removals, cleaning leftover files, and minimizing repeated admin prompts during uninstall work.
+An agent skill for auditing macOS app removals, cleaning leftover files, and minimizing repeated admin prompts during uninstall work. It is packaged as a plain skill directory so it can be used in both Codex and Claude Code.
 
 ## What It Does
 
@@ -43,12 +43,16 @@ Install the optional cross-PTY sudo cache mode:
 sudo bash scripts/install_sudo_cache_mode.sh --balanced
 ```
 
-## Install As A Local Codex Skill
+## Install In Codex
 
-Copy or clone this directory into:
+Official Codex docs say user-scoped skills live under `~/.agents/skills/<skill-name>` and can be invoked explicitly with `$skill-name`.
+
+Fastest path:
 
 ```bash
-$CODEX_HOME/skills/macos-uninstall-cleanup
+git clone https://github.com/yongyaoduan/macos-uninstall-cleanup.git
+cd macos-uninstall-cleanup
+./install.sh codex
 ```
 
 Then invoke it in Codex with:
@@ -56,3 +60,36 @@ Then invoke it in Codex with:
 ```text
 Use $macos-uninstall-cleanup to uninstall a macOS app and remove leftover login items, launchd jobs, data, and logs.
 ```
+
+Notes:
+
+- the installer prefers `~/.agents/skills`, but falls back to `~/.codex/skills` when that legacy directory already exists on the machine
+- `./install.sh codex --copy` installs a standalone copy instead of a symlink
+
+## Install In Claude Code
+
+Claude Code docs say personal skills live under `~/.claude/skills/<skill-name>/SKILL.md` and can be invoked with `/skill-name`.
+
+Fastest path:
+
+```bash
+git clone https://github.com/yongyaoduan/macos-uninstall-cleanup.git
+cd macos-uninstall-cleanup
+./install.sh claude
+```
+
+Then invoke it in Claude Code with:
+
+```text
+/macos-uninstall-cleanup uninstall OneDrive and clean leftover launch agents
+```
+
+Notes:
+
+- `./install.sh claude` defaults to a copy install
+- use `./install.sh claude --symlink` if you want edits in this repo to reflect directly in Claude Code
+
+## Distribution Notes
+
+- Codex supports direct skill folders, but OpenAI recommends packaging reusable public distributions as plugins when you want broader reuse beyond local setup.
+- Claude Code uses the same `SKILL.md`-based skill format and also supports project-local skills under `.claude/skills/`.

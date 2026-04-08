@@ -30,6 +30,14 @@ ALLOWED_BOOTOUT_ROOTS = (
 )
 
 
+def top_level_container_candidate(path: Path, root: Path) -> bool:
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return False
+    return len(relative.parts) == 1
+
+
 def allowed_user_roots():
     home = invoking_home()
     return (
@@ -52,8 +60,22 @@ def validate_remove_path(raw_path: str) -> Path:
     if not path.is_absolute():
         raise ValueError(f"remove path must be absolute: {raw_path}")
 
-    for root in ALLOWED_ROOTS + allowed_user_roots():
+    for root in ALLOWED_ROOTS:
         if path != root and is_relative_to(path, root):
+            return path
+
+    for root in allowed_user_roots():
+        if path == root:
+            continue
+        if is_relative_to(path, root):
+            if not top_level_container_candidate(path, root):
+                raise ValueError(
+                    "user Library container and iCloud removals must target a top-level app container directory, not nested content"
+                )
+            if root.name == "Mobile Documents" and path.name == "com~apple~CloudDocs":
+                raise ValueError(
+                    "refusing to remove the top-level iCloud Drive container com~apple~CloudDocs"
+                )
             return path
 
     raise ValueError(f"remove path is outside approved uninstall roots: {raw_path}")
