@@ -1,0 +1,4 @@
+interface:
+  display_name: "macOS Uninstall Cleanup"
+  short_description: "Uninstall Mac apps and remove residue"
+  default_prompt: "Use $macos-uninstall-cleanup to scan for residue, remove user-writable paths first, skip sudo when cleanup_plan.root_batch_remove_paths is empty, and use scripts/root_cleanup_batch.py for one privileged cleanup batch when needed."
