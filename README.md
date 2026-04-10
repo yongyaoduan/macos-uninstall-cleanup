@@ -1,13 +1,17 @@
 # macOS Uninstall Cleanup
 
-这个技能用来检查 macOS 应用是否卸干净、清掉残留文件，并尽量把管理员认证压缩到一次。它是普通技能目录，Codex 和 Claude Code 都能直接用。
+This skill audits macOS app removals and clears leftover files.
+It also tries to keep administrator authentication to a minimum.
+It is packaged as a plain skill directory.
+It works in both Codex and Claude Code.
 
 ## What It Does
 
 - scans common uninstall residue locations without `sudo`
 - classifies leftovers by delete strategy before removal
 - separates user-space deletes from one batched privileged cleanup
-- detects container-managed and iCloud-backed paths that should not be retried blindly
+- detects container-managed paths
+- detects iCloud-backed paths that should not be retried blindly
 - opens the macOS administrator dialog for the final privileged cleanup batch
 - includes helper scripts for root-batch cleanup and optional sudo cache tuning
 
@@ -22,7 +26,8 @@
 - `scripts/install_sudo_cache_mode.sh`: optional sudo timestamp policy installer
 - `scripts/remove_sudo_cache_mode.sh`: rollback helper
 - `scripts/sudo_cache_status.py`: local sudo cache mode status helper
-- `tests/test_root_cleanup_prompt.py`: unit tests for the administrator-dialog wrapper
+- `tests/test_root_cleanup_prompt.py`: unit tests
+  for the administrator-dialog wrapper
 
 ## Usage
 
@@ -50,7 +55,19 @@ python3 scripts/root_cleanup_prompt.py \
   --remove "/Library/Application Support/Vendor"
 ```
 
-如果你在别的流程里仍然需要跨 PTY 共享 `sudo` 缓存，可以再装这个可选模式：
+Important:
+
+- `scripts/root_cleanup_prompt.py`
+  uses `osascript ... with administrator privileges`
+- it must run in a local macOS GUI session
+- the system needs to be able to show an authentication dialog
+- it is not suitable for SSH-only shells
+- it is not suitable for CI runners or other headless environments
+- in headless workflows, use `scripts/root_cleanup_batch.py` instead
+- run that helper under an explicit root context
+
+If you still want cross-PTY `sudo` caching for other workflows,
+you can install the optional cache mode:
 
 ```bash
 sudo bash scripts/install_sudo_cache_mode.sh --balanced
@@ -58,7 +75,8 @@ sudo bash scripts/install_sudo_cache_mode.sh --balanced
 
 ## Install In Codex
 
-Official Codex docs place user-scoped skills under `~/.agents/skills/<skill-name>`.
+Official Codex docs place user-scoped skills
+under `~/.agents/skills/<skill-name>`.
 Invoke the skill explicitly with `$skill-name`.
 
 Fastest path:
@@ -79,12 +97,13 @@ Remove leftover login items, launchd jobs, data, and logs.
 Notes:
 
 - the installer prefers `~/.agents/skills`
-- it falls back to `~/.codex/skills` when that legacy directory already exists on the machine
+- it falls back to `~/.codex/skills` when that legacy directory already exists
 - `./install.sh codex --copy` installs a standalone copy instead of a symlink
 
 ## Install In Claude Code
 
-Claude Code docs place personal skills under `~/.claude/skills/<skill-name>/SKILL.md`.
+Claude Code docs place personal skills
+under `~/.claude/skills/<skill-name>/SKILL.md`.
 Invoke the skill with `/skill-name`.
 
 Fastest path:
@@ -104,11 +123,14 @@ Then invoke it in Claude Code with:
 Notes:
 
 - `./install.sh claude` defaults to a copy install
-- use `./install.sh claude --symlink` if you want edits in this repo to reflect directly in Claude Code
+- use `./install.sh claude --symlink` for a live link to this repo
+- choose that mode when you want local edits
+- to show up in Claude Code immediately
 
 ## Distribution Notes
 
 - Codex supports direct skill folders.
-- OpenAI recommends packaging reusable public distributions as plugins when you want broader reuse beyond local setup.
+- OpenAI recommends packaging reusable public distributions as plugins.
+- That is the better fit when you want reuse beyond local setup.
 - Claude Code uses the same `SKILL.md`-based skill format.
 - Claude Code also supports project-local skills under `.claude/skills/`.
