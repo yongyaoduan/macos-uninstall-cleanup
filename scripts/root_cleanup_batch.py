@@ -156,7 +156,7 @@ def main():
         print(
             json.dumps(
                 {
-                    "error": "Run this helper under sudo so all privileged work happens in one prompt.",
+                    "error": "Run this helper as root, or use scripts/root_cleanup_prompt.py to open a macOS administrator dialog for the batch.",
                 },
                 ensure_ascii=False,
                 indent=2,

@@ -1,35 +1,37 @@
 ---
 name: macos-uninstall-cleanup
-description: Use this skill when a user wants to uninstall a macOS app, verify whether an app was fully removed, or clean leftover login items, launchd jobs, helpers, caches, preferences, logs, shared data, or broken app links after uninstall. Trigger it for requests about removing Mac software, deleting app residue from `~/Library`, `/Library`, or `/Users/Shared`, auditing startup items left by old apps, or checking whether an uninstall was complete.
+description: Use when uninstalling a macOS app or cleaning leftover app files and startup hooks after uninstall.
 ---
 
 # macOS Uninstall Cleanup
 
 ## Overview
 
-Use this skill to audit a macOS app uninstall, remove approved residue, and verify that startup hooks and leftover files are gone.
+这个技能用于检查 macOS 应用卸载是否完整，删除已经确认的残留，并确认启动项已经消失。
 
-Prefer a three-pass workflow: inventory first, delete second, verify last.
+流程很简单：先盘点，再删除，再复查。
 
 ## Password Minimization
 
 Rules:
 
-- Do not use `sudo` for the initial scan unless a specific read operation is blocked.
-- Prefer plain `find`, `launchctl print-disabled system`, `osascript`, and receipt scans first.
-- Do not use `sfltool` unless the user explicitly asks for it.
-- Before marking a path `root_required`, check whether its delete parent is actually writable by the current user. `/Applications` and `/Users/Shared` are not automatically root-only on every machine.
-- After `python3 scripts/scan_residue.py ...`, use `cleanup_plan.user_delete_paths` for non-root deletes and `cleanup_plan.root_batch_remove_paths` for the single privileged batch.
-- If `cleanup_plan.root_batch_remove_paths` is empty, do not emit `sudo`.
-- When privileged work is needed, prefer one `sudo python3 scripts/root_cleanup_batch.py ...` invocation that contains every system unload, disable, delete, and receipt-forget action.
-- Never output more than one independent `sudo` command for uninstall work in the same answer. Gather every root-only action first, then emit one helper invocation.
-- Validate privileged plans with `python3 scripts/root_cleanup_batch.py --dry-run ...` before prompting.
-- Do not use `sudo` for verification, reporting, or receipt listing.
-- If a path is under `~/Library/Containers`, `~/Library/Group Containers`, or `~/Library/Mobile Documents`, classify it before deleting. Do not keep retrying the same delete when macOS is signaling container or iCloud protection.
+- 初次扫描不要用 `sudo`，除非某个只读检查真的被权限挡住。
+- 先用普通命令做盘点：`find`、`launchctl print-disabled system`、`osascript`、`pkgutil`。
+- 除非用户明确要求，否则不要用 `sfltool`。
+- 把路径标成 `root_required` 之前，先看父目录是不是当前用户真有删除权限。`/Applications` 和 `/Users/Shared` 不一定都需要提权。
+- 跑完 `python3 scripts/scan_residue.py ...` 后，先用 `cleanup_plan.user_delete_paths` 处理非提权删除。
+- 再把 `cleanup_plan.root_batch_remove_paths` 汇总成一次提权操作。
+- 如果 `cleanup_plan.root_batch_remove_paths` 为空，就不要再弹管理员认证框。
+- 需要提权时，优先用一条 `python3 scripts/root_cleanup_prompt.py ...`。让这一次系统弹窗把卸载、停用、删除和 receipt forget 全做完。
+- 同一轮卸载里不要给出多个独立的提权命令。先把 root 侧操作收齐，再发一次。
+- 弹窗前先用 `python3 scripts/root_cleanup_batch.py --dry-run ...` 检查计划。
+- 复查、汇报、列 receipt 时不要用 `sudo`。
+- 遇到 `~/Library/Containers`、`~/Library/Group Containers`、`~/Library/Mobile Documents` 下的路径，先分类型再删。
+- macOS 如果拦了，就停下来说明原因，不要硬重试。
 
 ## Quick Start
 
-Run the bundled scanner with product and vendor names:
+用产品名和厂商名跑自带扫描器：
 
 ```bash
 python3 scripts/scan_residue.py "Battle.net" Blizzard
@@ -37,20 +39,20 @@ python3 scripts/scan_residue.py Riot "League of Legends" LeagueClient RiotClient
 python3 scripts/scan_residue.py Grammarly
 ```
 
-The scanner inventories:
+扫描器会列出：
 
-- app bundles and broken links under `/Applications` and `~/Applications`
-- user and system leftovers under `~/Library`, `/Library`, and `/Users/Shared`
-- `launchctl` labels, running processes, and login items
-- delete constraints for matched paths such as `root_required`, `container_managed`, `may_need_full_disk_access`, and `icloud_synced`
-- a delete strategy per path
-- a `cleanup_plan` that separates user deletes from the single privileged batch
+- `/Applications` 和 `~/Applications` 下面的应用包与坏链接
+- `~/Library`、`/Library`、`/Users/Shared` 下面的用户级和系统级残留
+- `launchctl` 标签、运行中的进程和登录项
+- 删除约束，比如 `root_required`、`container_managed`、`may_need_full_disk_access`、`icloud_synced`
+- 每个路径对应的删除策略
+- 把普通删除和提权删除分开的 `cleanup_plan`
 
 ## Workflow
 
 ### 1. Inventory Before Deleting
 
-Start with a read-only pass.
+先做只读盘点。
 
 Useful commands:
 
@@ -67,34 +69,34 @@ osascript -e 'tell application "System Events" to get the properties of every lo
 launchctl list | rg -i 'vendor|app'
 ```
 
-If `cleanup_plan.root_batch_remove_paths` is empty, do not escalate.
+如果 `cleanup_plan.root_batch_remove_paths` 为空，就不要提权。
 
-If the scanner flags a path as `container_managed`, `may_need_full_disk_access`, or `icloud_synced`, treat that as a preflight result.
+如果扫描器把路径标成 `container_managed`、`may_need_full_disk_access` 或 `icloud_synced`，先调整方案，再决定删不删。
 
 ### 2. Separate Scope
 
-Before deleting, classify findings into these buckets:
+删除前，先把发现分到这些桶里：
 
 - app bundle or broken `/Applications/*.app` link
 - user data under `~/Library`
 - system helpers and launchd files under `/Library`
 - shared vendor data under `/Users/Shared`
 - iCloud containers under `~/Library/Mobile Documents`
-- protected container metadata, where macOS may block `rm` even for root without the right privacy context
+- 受保护的容器元数据。权限上下文不对时，即使是 root，macOS 也可能拦下 `rm`
 
-Shared vendor folders may belong to multiple products.
+共享厂商目录可能不只属于一个产品。
 
-Protected-path notes:
+受保护路径注意点：
 
-- `~/Library/Containers/*` and some `~/Library/Group Containers/*` items may be container-managed
-- `~/Library/Mobile Documents/*` may reappear from iCloud
-- if Full Disk Access is missing, stop and report that once instead of retrying deletes
+- `~/Library/Containers/*` 和部分 `~/Library/Group Containers/*` 项可能由系统容器管理
+- `~/Library/Mobile Documents/*` 可能会被 iCloud 重新拉回本地
+- 如果缺 Full Disk Access，就停下来说明一次，不要反复重试删除
 
 ### 2a. Preferred Example Flow
 
-Use one combined privileged plan, not several small `sudo` commands.
+提权操作要合并成一批，不要拆成好几条小命令。
 
-Example pattern:
+推荐流程示例：
 
 ```bash
 python3 scripts/scan_residue.py "App Name" Vendor
@@ -116,7 +118,7 @@ python3 scripts/root_cleanup_batch.py --dry-run \
   --remove "/Users/Shared/App Name" \
   --forget-pkg com.vendor.package
 
-sudo python3 scripts/root_cleanup_batch.py \
+python3 scripts/root_cleanup_prompt.py \
   --bootout-system /Library/LaunchDaemons/com.vendor.helper.plist \
   --disable-system com.vendor.helper \
   --remove "/Applications/App Name.app" \
@@ -129,11 +131,11 @@ sudo python3 scripts/root_cleanup_batch.py \
 python3 scripts/scan_residue.py "App Name" Vendor
 ```
 
-Do not split the root-only part above into separate `sudo` commands unless the helper script truly cannot express the required operation.
+除非辅助脚本确实表达不了，否则不要把上面的 root 操作拆成多个系统弹窗。
 
 ### 3. Disable Startup Hooks First
 
-Do not delete active launch files before unloading them.
+先卸载启动项，再删文件。
 
 User domain:
 
@@ -159,11 +161,11 @@ For login items:
 osascript -e 'tell application "System Events" to delete login item "App Name"'
 ```
 
-Keep multiple system items in the same helper invocation.
+多个 system 项目放到同一个 helper 调用里。
 
 ### 4. Remove Approved Residue
 
-Delete only after the scope is confirmed.
+确认范围后再删。
 
 Typical user paths:
 
@@ -208,15 +210,15 @@ pkgutil --pkgs | rg -i 'vendor|app'
 --forget-pkg com.vendor.package
 ```
 
-Do not blindly retry protected deletes. Preferred handling:
+受保护路径不要盲目重试，按下面的方式处理：
 
 - `container_managed`: report that Full Disk Access or a manual Finder cleanup may be required
-- `icloud_synced`: delete locally once, then remove the same container from Finder iCloud Drive or [iCloud.com](https://www.icloud.com/) if it reappears
-- `root_required`: batch all matching paths into one helper invocation, not several separate `sudo` commands
+- `icloud_synced`: 先删本地。如果它又回来，再去 Finder 的 iCloud Drive 或 [iCloud.com](https://www.icloud.com/) 删同一个容器
+- `root_required`: 把所有命中路径并到同一个 helper 调用里，不要拆成多个提权弹窗
 
 ### 5. Verify Cleanup
 
-Repeat the same scan after deletion.
+删完后再跑同一轮扫描。
 
 Minimum verification:
 
@@ -226,37 +228,37 @@ launchctl list | rg -i 'vendor|app'
 ps aux | rg -i 'vendor|app'
 ```
 
-Interpret results carefully:
+复查时按这个标准判断：
 
-- no matching files plus no matching `launchctl` labels is the strongest signal that cleanup succeeded
-- if a file path still exists, the uninstall is not complete
+- 没有命中文件，也没有匹配到 `launchctl` 标签，基本就说明清理干净了
+- 如果某个路径还在，卸载就还没完成
 
 ## Special Cases
 
 ### iCloud Containers
 
-App-specific iCloud containers under `~/Library/Mobile Documents` may require `sudo` to remove. Some empty containers can reappear if iCloud sync restores them.
+`~/Library/Mobile Documents` 下面的应用 iCloud 容器，有时需要管理员认证才能删。有些空目录会被 iCloud 同步重新拉回来。
 
-If a container keeps returning:
+如果容器删了又回来：
 
-1. add the local delete path to the same root helper invocation
-2. check Finder iCloud Drive or [iCloud.com](https://www.icloud.com/) for the same container
-3. remove it from the cloud source as well
+1. 把本地删除路径加进同一个 root helper 调用
+2. 去 Finder 的 iCloud Drive 或 [iCloud.com](https://www.icloud.com/) 找同一个容器
+3. 云端也一起删掉
 
-If a container delete fails with `Operation not permitted`, do not keep looping on the same command. Report that the remaining item is protected by macOS container or privacy controls and switch to a manual or Full Disk Access path.
+如果容器删除报 `Operation not permitted`，不要在同一条命令上死循环。直接说明它被 macOS 隐私或容器机制保护了，然后切到 Full Disk Access 或手动清理。
 
 ### Shared Vendor Data
 
-Do not assume every vendor folder is safe to wipe. Audit contents first when the vendor may own multiple apps or games.
+不要默认厂商目录都能整包删掉。厂商名下面如果挂着多个应用或游戏，先看内容。
 
 ## Reporting Back
 
-When you finish, summarize:
+完成后按下面几点汇报：
 
-- what was still installed
-- what residue you removed
-- what startup items were disabled or deleted
-- which items were skipped because of container or iCloud protection
-- what, if anything, remains and why
+- 还装着什么
+- 这次删了哪些残留
+- 停掉或删掉了哪些启动项
+- 哪些项目因为容器或 iCloud 保护而跳过
+- 还剩什么，以及为什么还在
 
-Keep the summary concrete. Prefer exact paths over generic statements.
+汇报写具体，尽量给出准确路径，不要只说“已经清理”。
